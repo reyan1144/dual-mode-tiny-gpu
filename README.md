@@ -347,7 +347,6 @@ dual-mode-tiny-gpu/
 ├── mem/
 │   ├── sin_lut.mem
 │   └── cos_lut.mem
-├── .gitignore
 ├── LICENSE
 └── README.md
 ```
