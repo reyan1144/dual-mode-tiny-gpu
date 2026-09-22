@@ -102,25 +102,33 @@ The clocks are never manually gated. Instead, side-effecting request signals are
 
 The graphics engine implements a small fixed-function rendering path:
 
-```text
-128-bit command
-      │
-      ▼
-Command FIFO → Decoder → Command Processor
-                             │
-                 ┌───────────┴───────────┐
-                 ▼                       ▼
-            Line Engine          Vertex Processor
-                                         │
-                                         ▼
-                                Triangle Rasterizer
-                                         │
-                                         ▼
-                                      Z-Buffer
-                 │                       │
-                 └───────────┬───────────┘
-                             ▼
-                         Framebuffer
+```mermaid
+flowchart TD
+    CMD["128-bit Graphics Command"]
+
+    subgraph FRONTEND["Command Front End"]
+        FIFO["Command FIFO"]
+        DEC["Command Decoder"]
+        CP["Command Processor"]
+
+        FIFO --> DEC
+        DEC --> CP
+    end
+
+    CMD --> FIFO
+
+    CP -->|"Draw Line"| LINE["Line Engine"]
+    CP -->|"Draw Triangle"| VP["Vertex Processor"]
+
+    LUT["Sine and Cosine LUTs"] -->|"Transformation Data"| VP
+    VP --> RAST["Triangle Rasterizer"]
+    RAST -->|"Pixel and Depth"| ZBUF["Z-Buffer / Depth Test"]
+
+    LINE -->|"Pixel Write"| FB["64 × 64 Framebuffer"]
+    ZBUF -->|"Visible Pixel Write"| FB
+
+    FB --> READBACK["Framebuffer Pixel Readback"]
+    CP --> STATUS["Graphics Busy / Done Status"]
 ```
 
 ### Graphics capabilities
@@ -164,22 +172,48 @@ Command FIFO → Decoder → Command Processor
 
 The compute engine is a parameterized multicore SIMD architecture. A multicore controller dispatches work to available shader cores. Within each core, a round-robin scheduler selects ready warps and executes one shared instruction stream across multiple lanes.
 
-```text
-Global Start
-     │
-     ▼
-Multicore Controller
-     │
-     ▼
-Shader Core Array
-     │
-     ├── Warp Context
-     ├── Round-Robin Warp Scheduler
-     ├── Per-Warp Program Counter
-     ├── Shared Instruction Memory
-     └── SIMD Lanes
-          ├── Register File
-          └── ALU
+```mermaid
+flowchart TD
+    START["Global Compute Start"] --> MC["Multicore Controller"]
+    MC --> ARRAY["Multicore Shader-Core Array"]
+
+    subgraph CORE["Shader Core — Replicated Across 4 Cores"]
+        WCTX["Warp Context — 4 Warps"]
+        SCHED["Round-Robin Warp Scheduler"]
+        PC["Per-Warp Program Counter"]
+        IMEM["Shared Instruction Memory"]
+        IR["Instruction Register"]
+        DEC["Shader Decoder"]
+        CTRL["Shader Controller"]
+
+        WCTX --> SCHED
+        SCHED -->|"Selected Warp"| PC
+        PC -->|"Instruction Address"| IMEM
+        IMEM --> IR
+        IR --> DEC
+        DEC --> CTRL
+
+        subgraph LANES["SIMD Lane Array — 4 Lanes"]
+            RF["Per-Warp / Per-Lane Register Files"]
+            ALU["SIMD ALUs — ADD, SUB, MUL, MOV"]
+
+            RF -->|"Operands"| ALU
+            ALU -->|"Result Writeback"| RF
+        end
+
+        CTRL -->|"Decoded Control Signals"| RF
+        CTRL -->|"ALU Operation"| ALU
+    end
+
+    ARRAY --> SCHED
+
+    PROG["Program-Write Interface"] -->|"Broadcast Program to All Cores"| IMEM
+    REGLOAD["Register-Load Interface"] -->|"Core / Warp / Lane / Register"| RF
+
+    RF -->|"Selected Register Value"| READBACK["Register Readback"]
+    CTRL --> STATUS["Core Busy / Done Status"]
+    STATUS --> MC
+    MC --> RESULT["Compute Busy / Done"]
 ```
 
 ### Default compute configuration
